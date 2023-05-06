@@ -12,6 +12,7 @@ availability_end_point = "https://api.tomtom.com/search/2/chargingAvailability.j
 poi_request_data = {
     "lat": 38,
     "lon": -122,
+    "radius": 13500,  # radius of downtown San Francisco
     "view": "Unified",
     "relatedPois": "off",
     "key": "NbiuShqBuFQ8H7v5h62BcuiCfl9bepll",
@@ -32,21 +33,26 @@ df = pandas.DataFrame(
 try:
     response = requests.get(poi_end_point, poi_request_data)
     response.raise_for_status()
-except requests.exceptions.HTTPError as err:
+except requests.exceptions.HTTPError as err:  # Bad Response
     raise SystemExit(err)
-except requests.exceptions.RequestException as err:
+except requests.exceptions.RequestException as err:  # Anything else
     raise SystemExit(err)
 
 poi_results = response.json()["results"]
 for res in poi_results:
-    station_name = res["poi"]["name"]
-    url_home = urlparse("https://" + res["poi"]["url"]).netloc
-    url_home = url_home.removesuffix(".com").removeprefix("www.")
-    if station_name.lower() in url_home:
+    station_name = res["poi"]["name"]  # get station name
+    url_home = urlparse("https://" + res["poi"]["url"]).netloc  # get url name
+    url_home = url_home.removesuffix(".com").removeprefix(
+        "www."
+    )  # remove .www and .com
+    if (
+        station_name.lower() in url_home
+    ):  # if the station name is in the url, it most likely is just the network name
         network_name = station_name
-    else:
+    else:  # otherwise use the url name
         network_name = url_home
-    id = res["id"]
+    id = res["id"]  # used as primary key in database
+
     rated_power_stats = []
     for connector in res["chargingPark"]["connectors"]:
         rated_power_stats.append(connector["ratedPowerKW"])
@@ -55,7 +61,10 @@ for res in poi_results:
     lon = res["position"]["lon"]
 
     availability_request_data = {
-        "chargingAvailability": re.sub("[^0-9]", "", res["info"]),
+        "chargingAvailability": re.sub(
+            "[^0-9]", "", res["info"]
+        ),  # this is also available in the "datasources" header, but it isn't in every response,
+        # so pulling it from here is more consistent
         "key": "NbiuShqBuFQ8H7v5h62BcuiCfl9bepll",
     }
 
@@ -74,7 +83,9 @@ for res in poi_results:
     num_total = 0
     num_available = 0
     for res in availability_results:
-        num_available += res["availability"]["current"]["available"]
+        num_available += res["availability"]["current"][
+            "available"
+        ]  # sum all available connectors
         num_total += res["total"]
 
     df.loc[len(df.index)] = [
@@ -89,7 +100,7 @@ for res in poi_results:
 df = df.set_index("id")
 df.to_csv("results.csv")
 
-if DATABASE_UPLOAD:
+if DATABASE_UPLOAD:  # uploads data to database, based on flag
     engine = create_engine(
         "postgresql+psycopg2://postgres:postgres@localhost:5432/postgres"
     )
